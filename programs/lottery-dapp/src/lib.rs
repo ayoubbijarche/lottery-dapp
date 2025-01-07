@@ -1,34 +1,20 @@
 use anchor_lang::prelude::*;
+use borsh::BorshDeserialize;
 use rand::{distributions::Alphanumeric , Rng};
-
-
-
+use std::time::{Duration , Instant};
+use std::thread;
 
 //tasks
-
-
 /*
     - generate code [x]
     - generates tickets [x]
-    - create init users []
+    - init users []
+    - create winning ticket [x]
     - assign tickets to users []
-    - init timer []
+    - init timer [x]
+    - create winning code []
     - reward distribution []
 */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 declare_id!("9E3vbRyXQ5hXzoJTmDmg25jvDf2kx7MipnPQmGN59Qft");
 
@@ -70,6 +56,24 @@ pub mod lottery_dapp {
         }
         ticket.ticket_code[i] = rand.code[i].to_string();
         ticket.price = 0.25;
+        Ok(())
+    }
+
+
+    /*
+    pub fn timer_start(ctx : Context<Timeracc>) -> Result<()>{
+        let timer = &mut ctx.accounts.timer_acc;
+        timer.duration = Duration::new(60, 0);
+        let start = Instant::now();
+        if start.elapsed() < timer.duration{
+            //still figuring out what to do!
+        }
+        Ok(())
+    }*/
+
+    pub fn winning_choice(ctx: Context<ChoiceAcc>) -> Result<()> {
+        let accounts = ctx.accounts;
+        accounts.choice_acc.code = accounts.rand_acc.code[rand::thread_rng().gen_range(0..200)].to_string().to_string();
         Ok(())
     }
 
@@ -126,18 +130,52 @@ pub struct Ticketacc<'info>{
         space = Ticket::INIT_SPACE
     )]
     pub ticket_acc : Account<'info , Ticket>,
-
     #[account(
         init,
         payer = admin,
         space = Ticket::INIT_SPACE
     )]
     pub rand_acc : Account<'info , Randcode>,
+
     #[account(mut)]
     pub admin : Signer<'info>,
     pub system_program : Program<'info , System>
 }
 
+#[derive(Accounts)]
+pub struct Timeracc<'info>{
+    #[account(
+        init,
+        payer = admin,
+        space = 8
+    )]
+    pub timer_acc : Account<'info , Timer>,
+    #[account(mut)]
+    pub admin : Signer<'info>,
+    pub system_program : Program<'info , System>
+}
+
+
+#[derive(Accounts)]
+pub struct ChoiceAcc<'info>{
+    #[account(
+        init,
+        payer = admin,
+        space = Choice::INIT_SPACE
+    )]
+    pub choice_acc : Account<'info , Choice>,    
+
+    #[account(
+        init,
+        payer = admin,
+        space = Randcode::INIT_SPACE
+    )]
+    pub rand_acc : Account<'info , Randcode>,
+
+    #[account(mut)]
+    pub admin : Signer<'info>,
+    pub system_program : Program<'info , System>
+}
 
 
 #[account]
@@ -149,9 +187,8 @@ pub struct Ticket{
 }
 
 #[account]
-#[derive(InitSpace)]
 pub struct Timer{
-    pub duration : u64
+    pub duration : i64
 }
 
 
@@ -161,6 +198,14 @@ pub struct Timer{
 pub struct Randcode{
     #[max_len(32 , 200)]
     pub code : Vec<String> // generated codes goes to the vector
+}
+
+//winning choice code
+#[account]
+#[derive(InitSpace)]
+pub struct Choice{
+    #[max_len(32)]
+    pub code : String
 }
 
 
@@ -191,3 +236,6 @@ pub struct User{
     pub ticket : Ticket,
     pub iswinner : bool,
 }
+
+
+
