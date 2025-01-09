@@ -1,241 +1,124 @@
 use anchor_lang::prelude::*;
-use borsh::BorshDeserialize;
-use rand::{distributions::Alphanumeric , Rng};
-use std::time::{Duration , Instant};
-use std::thread;
 
-//tasks
-/*
-    - generate code [x]
-    - generates tickets [x]
-    - init users []
-    - create winning ticket [x]
-    - assign tickets to users []
-    - init timer [x]
-    - create winning code []
-    - reward distribution []
-*/
 
 declare_id!("9E3vbRyXQ5hXzoJTmDmg25jvDf2kx7MipnPQmGN59Qft");
 
 #[program]
 pub mod lottery_dapp {
 
+    use anchor_lang::solana_program::{program::invoke, system_instruction};
+
     use super::*;
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        let ticket = &mut ctx.accounts.ticket_acc;
-        ticket.price = 0.25;
-        let i = 0;
-        for i in 0..200{
-            ticket.ticket_code[i].to_string();
-        }
-        ticket.ticket_code[i] = " ".to_string();
+    pub fn initialize(ctx : Context<Initialize> , price : u64 , end_time_stamp : i64)-> Result<()>{
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.authority = lottery.authority.key();
+        lottery.price = price;
+        lottery.end_time_stamp = end_time_stamp;
         Ok(())
     }
 
-    pub fn generate_code(ctx : Context<Genacc>) -> Result<()>{
-        let code_gen = &mut ctx.accounts.rand_acc;
-        code_gen.code = (0..200)
-        .map(|_| {
-            rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(32)
-                .map(char::from)
-                .collect()
-        })
-        .collect();
+    pub fn buy_ticket(ctx : Context<BuyTicket>) -> Result<()> {
+        let lottery = &mut ctx.accounts.lottery;
+        let buyer = &mut ctx.accounts.buyer;
+        invoke(
+            &system_instruction::transfer(&buyer.key(), &lottery.key(), lottery.price),
+            &[
+                buyer.to_account_info(),
+                lottery.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+        )?;
+
+        lottery.participants.push(buyer.key());
+        lottery.sold += 1;
         Ok(())
     }
 
-    pub fn ticket_gen(ctx : Context<Ticketacc> ,) -> Result<()>{
-        let ticket = &mut ctx.accounts.ticket_acc;
-        let rand = &mut ctx.accounts.rand_acc;
-        let i = 0;
-        for i in 0..200{
-            rand.code[i].to_string();
-        }
-        ticket.ticket_code[i] = rand.code[i].to_string();
-        ticket.price = 0.25;
+    pub fn determin_winner(ctx : Context<DeterminWinner>) -> Result<()> {
+        let lottery = &mut ctx.accounts.lottery;
+        let clock = Clock::get()?;
+        let random_seed = clock.unix_timestamp;
+        let winner_index = (random_seed as usize) % lottery.participants.len();
+        lottery.won = Some(lottery.participants[winner_index]);
         Ok(())
     }
 
+    pub fn claim_reward(ctx : Context<Reward>) -> Result<()> {
+        let lottery = &mut ctx.accounts.lottery;
+        let winner = &ctx.accounts.winner;
 
-    /*
-    pub fn timer_start(ctx : Context<Timeracc>) -> Result<()>{
-        let timer = &mut ctx.accounts.timer_acc;
-        timer.duration = Duration::new(60, 0);
-        let start = Instant::now();
-        if start.elapsed() < timer.duration{
-            //still figuring out what to do!
-        }
-        Ok(())
-    }*/
+        require!(lottery.won.is_some(), LotteryError::NoWinnerYet);
+        require!(lottery.won.unwrap() == *winner.key, LotteryError::InvalidWinner);
 
-    pub fn winning_choice(ctx: Context<ChoiceAcc>) -> Result<()> {
-        let accounts = ctx.accounts;
-        accounts.choice_acc.code = accounts.rand_acc.code[rand::thread_rng().gen_range(0..200)].to_string().to_string();
+        let balance = &lottery.to_account_info().lamports();
+
+        invoke(&system_instruction::transfer(&lottery.key(), &winner.key(), *balance), 
+            &[
+            lottery.to_account_info(),
+            winner.to_account_info(),
+            ctx.accounts.system_program.to_account_info()
+        ])?;
         Ok(())
     }
-
-
 }
 
+
 #[derive(Accounts)]
+#[instruction(price: u64, end_time_stamp: i64)]
 pub struct Initialize<'info>{
     #[account(
         init,
-        payer = admin,
-        space = Ticket::INIT_SPACE
+        payer = authority,
+        space = 8 + 32 + 4 + (4 + 32 * 100) + 4 + 8 + 8 + 32
     )]
-    pub ticket_acc : Account<'info , Ticket>,
-
-    #[account(
-        init,
-        payer = admin,
-        space = Ticket::INIT_SPACE
-    )]
-    pub timer_acc : Account<'info , Timer>,
-    
-    #[account(
-        init,
-        payer = admin,
-        space = Randcode::INIT_SPACE
-    )]
-    pub rand_acc : Account<'info , Randcode>,
-
+    pub lottery : Account<'info , Lottery>,
     #[account(mut)]
-    pub admin : Signer<'info>,
-    pub system_program : Program<'info , System>
-}
-
-
-#[derive(Accounts)]
-pub struct Genacc<'info>{
-    #[account(
-        init,
-        payer = admin,
-        space = Randcode::INIT_SPACE
-    )]
-    pub rand_acc : Account<'info , Randcode>,
-    #[account(mut)]
-    pub admin : Signer<'info>,
+    pub authority : Signer<'info>,
     pub system_program : Program<'info , System>
 }
 
 #[derive(Accounts)]
-pub struct Ticketacc<'info>{
-    #[account(
-        init,
-        payer = admin,
-        space = Ticket::INIT_SPACE
-    )]
-    pub ticket_acc : Account<'info , Ticket>,
-    #[account(
-        init,
-        payer = admin,
-        space = Ticket::INIT_SPACE
-    )]
-    pub rand_acc : Account<'info , Randcode>,
-
+pub struct BuyTicket<'info>{
+    #[account(mut, seeds = [b"lottery"], bump)]
+    pub lottery : Account<'info , Lottery>,
     #[account(mut)]
-    pub admin : Signer<'info>,
+    pub buyer : Signer<'info>,
     pub system_program : Program<'info , System>
 }
 
 #[derive(Accounts)]
-pub struct Timeracc<'info>{
-    #[account(
-        init,
-        payer = admin,
-        space = 8
-    )]
-    pub timer_acc : Account<'info , Timer>,
-    #[account(mut)]
-    pub admin : Signer<'info>,
-    pub system_program : Program<'info , System>
+pub struct DeterminWinner<'info>{
+    #[account(mut, seeds = [b"lottery"], bump)]
+    pub lottery : Account<'info , Lottery>,
 }
-
 
 #[derive(Accounts)]
-pub struct ChoiceAcc<'info>{
-    #[account(
-        init,
-        payer = admin,
-        space = Choice::INIT_SPACE
-    )]
-    pub choice_acc : Account<'info , Choice>,    
-
-    #[account(
-        init,
-        payer = admin,
-        space = Randcode::INIT_SPACE
-    )]
-    pub rand_acc : Account<'info , Randcode>,
-
+pub struct Reward<'info>{
+    #[account(mut, seeds = [b"lottery"], bump)]
+    pub lottery : Account<'info , Lottery>,
     #[account(mut)]
-    pub admin : Signer<'info>,
+    pub winner : Signer<'info>,
     pub system_program : Program<'info , System>
 }
 
 
 #[account]
-#[derive(InitSpace)]
-pub struct Ticket{
-    #[max_len(32 , 200)]
-    pub ticket_code : Vec<String>,
-    pub price : f32
-}
-
-#[account]
-pub struct Timer{
-    pub duration : i64
+pub struct Lottery{
+    pub authority : Pubkey,
+    pub participants : Vec<Pubkey>,
+    pub price : u64,
+    pub end_time_stamp : i64,
+    pub sold : u64,
+    pub won : Option<Pubkey>
 }
 
 
-// random code account
-#[account]
-#[derive(InitSpace)]
-pub struct Randcode{
-    #[max_len(32 , 200)]
-    pub code : Vec<String> // generated codes goes to the vector
+#[error_code]
+pub enum LotteryError {
+    #[msg("Lottery has not ended yet")]
+    LotteryNotEnded,
+    #[msg("No winner determined yet")]
+    NoWinnerYet,
+    #[msg("Invalid winner")]
+    InvalidWinner,
 }
-
-//winning choice code
-#[account]
-#[derive(InitSpace)]
-pub struct Choice{
-    #[max_len(32)]
-    pub code : String
-}
-
-
-//all participating users
-#[account]
-#[derive(InitSpace)]
-pub struct Participates{
-    #[max_len(200)]
-    pub keys : Vec<Pubkey>,
-    #[max_len(30)]
-    pub code : String
-}
-
-
-//pool account where users money is in
-#[account]
-#[derive(InitSpace)]
-pub struct Pool{
-    pub admin : Pubkey,
-    pub balance : u64,
-}
-
-// user account data
-#[account]
-#[derive(InitSpace)]
-pub struct User{
-    pub key : Pubkey,
-    pub ticket : Ticket,
-    pub iswinner : bool,
-}
-
-
-
