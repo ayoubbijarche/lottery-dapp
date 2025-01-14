@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::{program::invoke, system_instruction};
 
 
 declare_id!("9E3vbRyXQ5hXzoJTmDmg25jvDf2kx7MipnPQmGN59Qft");
@@ -6,7 +7,6 @@ declare_id!("9E3vbRyXQ5hXzoJTmDmg25jvDf2kx7MipnPQmGN59Qft");
 #[program]
 pub mod lottery_dapp {
 
-    use anchor_lang::solana_program::{program::invoke, system_instruction};
 
     use super::*;
     pub fn initialize(ctx : Context<Initialize> , price : u64 , end_time_stamp : i64)-> Result<()>{
@@ -69,7 +69,9 @@ pub struct Initialize<'info>{
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 4 + (4 + 32 * 100) + 4 + 8 + 8 + 32
+        space = 8 + 32 + 4 + (4 + 32 * 100) + 4 + 8 + 8 + 32,
+        seeds = [b"LOTTERY_STATE"],
+        bump
     )]
     pub lottery : Account<'info , Lottery>,
     #[account(mut)]
@@ -79,7 +81,12 @@ pub struct Initialize<'info>{
 
 #[derive(Accounts)]
 pub struct BuyTicket<'info>{
-    #[account(mut, seeds = [b"lottery"], bump)]
+    //#[account(mut, seeds = [b"lottery"], bump)]
+    #[account(
+        mut, 
+        seeds = [b"LOTTERY_STATE"], 
+        bump 
+        )]
     pub lottery : Account<'info , Lottery>,
     #[account(mut)]
     pub buyer : Signer<'info>,
